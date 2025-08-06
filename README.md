@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/avatar.png" alt="Project File Concatenator Avatar" width="200">
+  <img src="./assets/avatar.jpeg" alt="Project File Concatenator Avatar" width="200">
 </p>
 
 # Project File Concatenator
