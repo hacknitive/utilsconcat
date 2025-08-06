@@ -1,0 +1,214 @@
+#!/bin/bash
+
+# Make the script exit immediately if a command exits with a non-zero status.
+set -e
+
+# ==============================================================================
+# --- User Configuration ---
+# Adjust the settings below to control the script's behavior.
+# All file paths are relative to the script's location unless you specify an
+# absolute path (e.g., /home/user/project).
+# chmod +x concatenator.sh
+# ==============================================================================
+
+# 1. Core Paths
+# The input directory to scan for files.
+INPUT_DIRECTORY="../../"
+# The final concatenated output file.
+OUTPUT_FILE="./concatenated_output.txt"
+# A list of all files that were included in the output.
+INCLUDED_FILES_LIST="./included_files.txt"
+# Log file for detailed operation information.
+LOG_FILE="./concat_files.log"
+
+# 2. Configuration Files
+# These files should contain one pattern per line. Comments (#) and empty lines are ignored.
+EXCLUDE_EXTENSIONS_FILE="exclude_extensions.csv"
+EXCLUDE_DIRECTORIES_FILE="exclude_directories.csv"
+EXCLUDE_FILES_FILE="exclude_files.csv"
+# A file containing strings that signify a comment line (e.g., "#", "//").
+COMMENT_SIGNS_FILE="comment_signs.csv"
+
+# 3. Content Filtering Options
+# Set to "true" to remove empty lines from files.
+DELETE_EMPTY_LINE=true
+# Set to "true" to remove comment lines (as defined in COMMENT_SIGNS_FILE).
+DELETE_COMMENT_LINE=true
+# Set to "true" to skip files that are empty *after* applying the filters above.
+SKIP_EMPTY_FILES=true
+
+
+# ==============================================================================
+# --- Script Implementation ---
+# Do not modify below this line unless you know what you are doing.
+# ==============================================================================
+
+# Get the directory where the script itself is located to resolve relative paths.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+
+# Function to write a message to the log file.
+log_info() {
+    # Appends a timestamped message to the log file.
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - INFO - $1" >> "$LOG_FILE"
+}
+
+# Function to read patterns from a config file.
+# It ignores empty lines and lines starting with a hash (#).
+read_config_patterns() {
+    local file_path="$1"
+    if [[ -f "$file_path" ]]; then
+        # Use grep to filter out empty/whitespace-only lines and comment lines.
+        grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$file_path" || true
+    fi
+}
+
+main() {
+    echo "Starting file concatenation process..."
+
+    # --- Setup and Path Resolution ---
+    # Resolve all paths to be absolute, preventing ambiguity.
+    # This ensures the script works correctly regardless of where it's called from.
+    INPUT_DIRECTORY=$(realpath "$INPUT_DIRECTORY")
+    OUTPUT_FILE=$(realpath "$OUTPUT_FILE")
+    INCLUDED_FILES_LIST=$(realpath "$INCLUDED_FILES_LIST")
+    LOG_FILE=$(realpath "$LOG_FILE")
+    
+    # Resolve paths for config files relative to the script's location.
+    EXCLUDE_EXTENSIONS_FILE="$SCRIPT_DIR/$EXCLUDE_EXTENSIONS_FILE"
+    EXCLUDE_DIRECTORIES_FILE="$SCRIPT_DIR/$EXCLUDE_DIRECTORIES_FILE"
+    EXCLUDE_FILES_FILE="$SCRIPT_DIR/$EXCLUDE_FILES_FILE"
+    COMMENT_SIGNS_FILE="$SCRIPT_DIR/$COMMENT_SIGNS_FILE"
+
+    # Prepare a temporary file for the list of included files. It will be sorted later.
+    local temp_included_files
+    temp_included_files=$(mktemp)
+    # Ensure the temporary file is deleted when the script exits, even on error.
+    trap 'rm -f "$temp_included_files"' EXIT
+
+    # Initialize log and output files.
+    >"$LOG_FILE"
+    log_info "Logging is set up."
+    log_info "Input Directory: $INPUT_DIRECTORY"
+    log_info "Output File: $OUTPUT_FILE"
+
+    # Write the initial header to the output file.
+    cat > "$OUTPUT_FILE" <<'EOF'
+These are the codes of my software project. Each file content is in a ``` ``` (markdown code block). At the first of the content, I write the file path. Read it carefully I want to ask you some questions.
+EOF
+
+    # --- Build `find` command arguments dynamically ---
+    local find_args=()
+
+    # 1. Exclude directories
+    # Read patterns from the config file and build '-path "pattern"' arguments.
+    # These are combined with '-prune' to stop 'find' from descending into them.
+    local dir_exclusions=()
+    while IFS= read -r pattern; do
+        if [[ -n "$pattern" ]]; then
+            dir_exclusions+=(-o -path "$INPUT_DIRECTORY/$pattern")
+            log_info "Excluding directory pattern: $pattern"
+        fi
+    done < <(read_config_patterns "$EXCLUDE_DIRECTORIES_FILE")
+
+    if [ ${#dir_exclusions[@]} -gt 0 ]; then
+        # The first element is '-o', which we remove. The rest form the exclusion group.
+        find_args+=(\( "${dir_exclusions[@]:1}" \) -prune)
+    fi
+
+    # 2. Exclude files by extension or pattern
+    # These are also pruned to exclude them from the final list.
+    local file_exclusions=()
+    while IFS= read -r pattern; do
+        if [[ -n "$pattern" ]]; then
+            file_exclusions+=(-o -path "$INPUT_DIRECTORY/$pattern")
+            log_info "Excluding file pattern: $pattern"
+        fi
+    done < <(read_config_patterns "$EXCLUDE_FILES_FILE")
+
+    while IFS= read -r ext; do
+        if [[ -n "$ext" ]];
+        then
+            local clean_ext=${ext#.} # Remove leading dot if present
+            file_exclusions+=(-o -name "*.$clean_ext")
+            log_info "Excluding file extension: .$clean_ext"
+        fi
+    done < <(read_config_patterns "$EXCLUDE_EXTENSIONS_FILE")
+
+    if [ ${#file_exclusions[@]} -gt 0 ]; then
+        # If directory exclusions exist, we need an '-o' to link the logic.
+        [[ ${#find_args[@]} -gt 0 ]] && find_args+=(-o)
+        find_args+=(\( "${file_exclusions[@]:1}" \) -prune)
+    fi
+
+    # --- Build `sed` command for content filtering ---
+    local sed_script=""
+    if [[ "$DELETE_EMPTY_LINE" == "true" ]]; then
+        sed_script+='/^[[:space:]]*$/d;'
+        log_info "Configured to delete empty lines."
+    fi
+    if [[ "$DELETE_COMMENT_LINE" == "true" ]]; then
+        log_info "Configured to delete comment lines."
+        while IFS= read -r sign; do
+            if [[ -n "$sign" ]]; then
+                # Escape special regex characters in the comment sign for sed.
+                local escaped_sign
+                escaped_sign=$(printf '%s\n' "$sign" | sed 's:[][\\/.^$*]:\\&:g')
+                sed_script+="/^[[:space:]]*${escaped_sign}/d;"
+                log_info "Adding comment sign for filtering: $sign"
+            fi
+        done < <(read_config_patterns "$COMMENT_SIGNS_FILE")
+    fi
+
+    # --- Process Files ---
+    # The final part of the find command prints the full path of any remaining files.
+    # The 'while' loop reads each file path that 'find' outputs.
+    local final_find_cmd=("find" "$INPUT_DIRECTORY" "${find_args[@]}" -o -type f -print)
+    log_info "Executing find command: ${final_find_cmd[*]}"
+
+    while IFS= read -r file_path; do
+        # Filter the content of the file using the generated sed script.
+        local filtered_content
+        if [[ -n "$sed_script" ]]; then
+            filtered_content=$(sed "$sed_script" "$file_path")
+        else
+            filtered_content=$(cat "$file_path")
+        fi
+
+        # If skipping empty files, check if the filtered content is empty.
+        if [[ "$SKIP_EMPTY_FILES" == "true" && -z "$filtered_content" ]]; then
+            log_info "Skipped empty file after filtering: $file_path"
+            continue
+        fi
+
+        # Get file path relative to the input directory for the header.
+        local relative_path="${file_path#"$INPUT_DIRECTORY/"}"
+
+        # Append file content to the output file, wrapped in markdown code blocks.
+        {
+            echo "\`\`\`${relative_path}"
+            echo "$filtered_content"
+            echo "\`\`\`"
+        } >> "$OUTPUT_FILE"
+
+        # Add the file to our temporary list of included files.
+        echo "$file_path" >> "$temp_included_files"
+        log_info "Included file: $file_path"
+
+    done < <("${final_find_cmd[@]}")
+
+    # --- Finalization ---
+    # Append the final message to the output.
+    echo "Now please answer these questions in English:" >> "$OUTPUT_FILE"
+
+    # Sort the list of included files alphabetically and write it to the final destination.
+    sort "$temp_included_files" > "$INCLUDED_FILES_LIST"
+    log_info "Included files list written to '$INCLUDED_FILES_LIST'."
+
+    echo
+    echo "✅ All eligible files have been concatenated into '$OUTPUT_FILE'."
+    echo "✅ Included files are listed in '$INCLUDED_FILES_LIST'."
+    echo "ℹ️  Check '$LOG_FILE' for any errors or excluded items."
+}
+
+# Execute the main function of the script.
+main

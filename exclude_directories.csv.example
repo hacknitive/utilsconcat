@@ -1,0 +1,15 @@
+__pycache__/
+venv/
+.git/
+*/.git/
+.vscode/
+**/concatenate/
+.idea/
+.github/
+**/test/
+**/.pytest_cache/
+__pycache__/
+
+
+
+

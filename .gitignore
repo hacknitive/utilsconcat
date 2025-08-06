@@ -1,0 +1,14 @@
+.env
+.env*
+!.env.example
+.vscode/
+automatic_git_status_add_commit_push.sh
+venv/
+renew_and_reload.log
+certbot/
+*.log
+concatenated_output.txt
+included_files.txt
+fake_repo/
+*.csv
+concatenator.sh
