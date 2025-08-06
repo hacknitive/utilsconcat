@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/avatar.png" alt="Project File Concatenator Avatar" width="200">
+</p>
+
 # Project File Concatenator
 
 This repository contains a powerful and configurable Bash script that traverses a project directory, filters files based on various criteria, and concatenates their contents into a single text file.
