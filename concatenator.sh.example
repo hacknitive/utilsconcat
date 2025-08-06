@@ -15,11 +15,11 @@ set -e
 # The input directory to scan for files.
 INPUT_DIRECTORY="../../"
 # The final concatenated output file.
-OUTPUT_FILE="./concatenated_output.txt"
+OUTPUT_FILE="./output/concatenated_output.txt"
 # A list of all files that were included in the output.
-INCLUDED_FILES_LIST="./included_files.txt"
+INCLUDED_FILES_LIST="./output/included_files.txt"
 # Log file for detailed operation information.
-LOG_FILE="./concat_files.log"
+LOG_FILE="./output/concat_files.log"
 
 # 2. Configuration Files
 # These files should contain one pattern per line. Comments (#) and empty lines are ignored.

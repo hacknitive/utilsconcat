@@ -1,186 +1,134 @@
-# Ready-to-Use Nginx-Certbot Docker Infrastructure
-This repository provides a containerized solution for automating the issuance and renewal of SSL certificates using [Certbot](https://certbot.eff.org/) together with [Nginx](https://nginx.org/). Leveraging Docker Compose, this project ensures the seamless integration of Nginx (serving web content and handling ACME challenges) and Certbot (acquiring and renewing certificates), while automating the process of certificate renewal.
+# Project File Concatenator
 
-## Table of Contents
-
-- [Ready-to-Use Nginx-Certbot Docker Infrastructure](#ready-to-use-nginx-certbot-docker-infrastructure)
-  - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Prerequisites](#prerequisites)
-  - [Setup \& Configuration](#setup--configuration)
-  - [Obtaining an SSL Certificate](#obtaining-an-ssl-certificate)
-  - [Viewing Issued Certificates](#viewing-issued-certificates)
-  - [Certificate Renewal](#certificate-renewal)
-  - [Automating Renewal via Cron](#automating-renewal-via-cron)
-  - [Nginx Configurations](#nginx-configurations)
-  - [Project Structure](#project-structure)
-  - [Conclusion](#conclusion)
+This repository contains a powerful and configurable Bash script that traverses a project directory, filters files based on various criteria, and concatenates their contents into a single text file.
 
 ## Overview
 
-This solution uses:
-- **Nginx** – to serve your website and handle HTTP (port 80) ACME challenges.
-- **Certbot** – to request and renew SSL certificates from Let’s Encrypt.
-- **Docker Compose** – to manage and orchestrate multi-container deployments easily.
+The main purpose of this script is to consolidate an entire software project's source code into a single, well-formatted file. This is particularly useful for feeding a complete codebase into a Large Language Model (LLM) or AI assistant for tasks such as:
 
-The automated renewal process is handled by the `renew_and_reload.sh` script, which renews certificates when needed and reloads Nginx to apply any new updates.
+*   **Holistic Debugging:** Providing the AI with the full context of all relevant files to find complex bugs.
+*   **Code Analysis & Refactoring:** Asking for suggestions on improving code quality, structure, or performance.
+*   **Generating Documentation:** Allowing the AI to understand the entire project to create comprehensive documentation.
+*   **Onboarding:** Creating a single file that a new developer (or AI) can review to quickly understand the project architecture.
+
+The script is highly customizable, allowing you to exclude irrelevant files, directories, and even specific lines of code (like comments or empty lines) to create a clean and focused output.
+
+### Features
+
+*   **Recursive File Traversal:** Scans the entire input directory and its subdirectories.
+*   **Flexible Exclusion Rules:** Exclude directories, files, and file extensions using simple `.csv` configuration files with glob pattern support.
+*   **Content Filtering:** Automatically remove empty lines and comment lines from the source files.
+*   **Custom Comment Signs:** Define your own comment indicators (e.g., `#`, `//`, `--`) in a configuration file.
+*   **Smart File Skipping:** Option to skip files that become empty after filtering.
+*   **Detailed Logging:** Creates a log file (`concat_files.log`) to record all actions, exclusions, and errors.
+*   **Included Files List:** Generates a sorted list (`included_files.txt`) of all files that were added to the final output.
+*   **Pure Bash:** Runs in any modern Linux/Unix environment with no external dependencies beyond standard core utilities (`find`, `grep`, `sed`).
 
 ## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed on your host machine.
-- A registered domain name that points to your server.
-- Basic command-line/terminal knowledge.
+*   A Unix-like operating system (e.g., Ubuntu 24.04, macOS).
+*   Bash (Bourne-Again SHell).
+*   Standard command-line utilities: `find`, `grep`, `sed`, `realpath`, `mktemp`.
 
 ## Setup & Configuration
 
-1. **Create and Configure the Environment File:**
+1.  **Save the Script:**
+    Save the main script as `concatenator.sh`.
 
-   - Copy the provided `.env.example` file to create your actual environment file:
-     ```bash
-     cp .env.example .env
-     ```
-   - Open the `.env` file and update the variables (paths, ports, container names, etc.) as required for your environment.
+2.  **Make it Executable:**
+    Open your terminal and grant execute permissions to the script:
+    ```bash
+    chmod +x concatenator.sh
+    ```
 
-2. **Configure Nginx for HTTP (Port 80):**
+3.  **Configure the Script:**
+    Open `concatenator.sh` and edit the variables in the **User Configuration** section at the top. You can set the input directory, output file paths, and filtering behavior here.
 
-   - In the `nginx/sites-available` folder, create or modify an Nginx configuration file (for example, `example.com-80.conf`) to listen on port 80. Ensure the configuration includes a block to handle ACME challenges:
-     ```nginx
-     server {
-         listen 80;
-         server_name example.com;
-         # Serve Certbot ACME challenge files.
-         location /.well-known/acme-challenge/ {
-             root /usr/share/nginx/html;
-             allow all;
-         }
-         location / {
-             proxy_pass http://0.0.0.0:3000;
-             include /etc/nginx/sites-available/common_proxy.conf;
-         }
-     }
-     ```
-   - Create a symbolic link in the `nginx/sites-enabled` folder:
-     ```bash
-     ln -s ../sites-available/example.com-80.conf nginx/sites-enabled/
-     ```
+    ```bash
+    # 1. Core Paths
+    INPUT_DIRECTORY="../my_project/"
+    OUTPUT_FILE="./output/concatenated_output.txt"
+    # ... and other settings
+    ```
 
-3. **Start Nginx Container:**
+4.  **Create Configuration Files:**
+    In the same directory as the script, create the following plain text files to define your exclusion rules. You can use the provided `.example` files as templates.
 
-   - With the environment and Nginx HTTP configuration in place, launch the Nginx container:
-     ```bash
-     docker compose --env-file .env up -d nginx
-     ```
-   - This command starts Nginx and makes it available to serve static content (including ACME challenge files).
+    *   **`exclude_directories.csv`**: List directory names or paths to exclude.
+        ```
+        .git/
+        node_modules/
+        .venv/
+        __pycache__/
+        ```
 
-## Obtaining an SSL Certificate
+    *   **`exclude_files.csv`**: List file names or paths to exclude. Glob patterns are supported.
+        ```
+        *.log
+        .env
+        package-lock.json
+        ```
 
-Use the following command to request an SSL certificate via Certbot. This utilizes the HTTP (webroot) method to verify domain ownership:
+    *   **`exclude_extensions.csv`**: List file extensions to exclude (the leading dot is optional).
+        ```
+        .tmp
+        .bak
+        .swp
+        ```
 
-```bash
-docker compose --env-file .env run --rm --entrypoint certbot certbot certonly --webroot --webroot-path=/usr/share/nginx/html --email hacknitive@gmail.com --agree-tos --no-eff-email -d example.com
-```
+    *   **`comment_signs.csv`**: List the strings that start a comment line.
+        ```
+        #
+        //
+        --
+        ```
 
-**Explanation:**
-- `--webroot` and `--webroot-path=/usr/share/nginx/html`: Direct Certbot to use the provided web root to place ACME challenge files.
-- `--email hacknitive@gmail.com`: Sets the contact email for renewal notices and related communication.
-- `--agree-tos --no-eff-email`: Automatically accepts the Let’s Encrypt terms and opts out of the Electronic Frontier Foundation email list.
-- `-d logapi.x50.ir`: Specifies the domain name for which the certificate is issued.
-- Replace the second `certbot` with the value of `CERTBOT_CONTAINER_NAME` environment variable in your `.env` file.
+## How to Run
 
-## Viewing Issued Certificates
-
-To review all the certificates managed by Certbot and check their details:
+With the configuration in place, simply execute the script from your terminal:
 
 ```bash
-docker compose --env-file .env run --rm --entrypoint certbot certbot certificates
-```
-- Replace the second `certbot` with the value of `CERTBOT_CONTAINER_NAME` environment variable in your `.env` file.
-
-This command informs you of the certificates’ issuance dates, expiration dates, and related paths.
-
-## Certificate Renewal
-
-The `renew_and_reload.sh` script can be run manually to renew your SSL certificates when needed. It does the following:
-- Validates the environment configuration.
-- Runs the Certbot renewal command.
-- Checks for certificate renewal flag creation.
-- Reloads the Nginx container if a certificate has been renewed.
-
-Run the script with:
-
-```bash
-./renew_and_reload.sh "/path/to/your/.env"
+./concatenator.sh
 ```
 
-To force a renewal even if the certificates are not near expiry (suitable for test), use:
+The script will start the process and print a confirmation message upon completion.
 
-```bash
-./renew_and_reload.sh "/path/to/your/.env" --force
-```
+### Output Files
 
-## Automating Renewal via Cron
+After running, you will find the following generated files:
 
-To ensure your certificates remain up-to-date, you can set up a cron job that periodically runs the renewal script.
+*   **`concatenated_output.txt`** (or your custom `OUTPUT_FILE`): The final combined file. Each included file's content is wrapped in a Markdown code block, with its relative path in the header.
+    ```
+    ```path/to/file1.py
+    print("Hello, World!")
+    ```
+    ```path/to/another/file.js
+    console.log("Hello again!");
+    ```
+    ```
 
-1. **Open your crontab file for editing:**
-   ```bash
-   crontab -e
-   ```
-
-2. **Add the following cron job entry:**
-   ```bash
-   0 5 * * * /path/to/infra-nginx-certbot/renew_and_reload.sh "/path/to/infra-nginx-certbot/.env" >> /path/to/infra-nginx-certbot/logs/cronjob.log 2>&1
-   ```
-   
-   **Explanation:**
-   - `0 5 * * *` – Runs the script at 5:00 AM every day.
-   - The command calls the `renew_and_reload.sh` script with your custom `.env` file.
-   - All output (both stdout and errors) is appended to `cronjob.log` for troubleshooting and monitoring.
-
-## Nginx Configurations
-
-The project includes sample Nginx configuration files located in the `nginx/sites-available` directory:
-
-1. **example.com-80.conf (HTTP):**
-   - Listens on port 80.
-   - Contains a location block to serve the ACME challenge files from `/usr/share/nginx/html`.
-   - Proxies other requests to your backend service (for example, running on port 3000).
-
-2. **example.com-443.conf (HTTPS):**
-   - Configured to listen on port 443 with SSL enabled.
-   - Specifies the paths for the SSL certificate and private key (e.g., `/etc/letsencrypt/live/example.com/fullchain.pem` and `/etc/letsencrypt/live/example.com/privkey.pem`).
-   - Proxies HTTPS requests to your backend service similarly.
-
-3. **common_proxy.conf:**
-   - Contains shared proxy settings used by both HTTP and HTTPS configurations.
+*   **`included_files.txt`**: A sorted list of the full paths of all files included in the concatenation.
+*   **`concat_files.log`**: A detailed log of the script's execution, including all exclusions and operations. Check this file for troubleshooting.
 
 ## Project Structure
 
-An overview of the repository structure:
-
 ```
-├── LICENSE                       # Project license file
-├── .gitignore                    # Git ignore rules for the repository
-├── README.md                     # This README file
-├── .env.example                  # Template for the environment configuration file
-├── docker-compose.yml            # Docker Compose configuration for Nginx and Certbot
-├── renew_and_reload.sh           # Script to renew certificates and reload Nginx
-├── nginx/
-│   ├── nginx.conf                # Main Nginx configuration file
-│   ├── mime.types                # MIME types list for Nginx
-│   ├── sites-available/          # Nginx site configuration templates
-│   │   ├── example.com-80.conf   # HTTP configuration for example.com
-│   │   ├── example.com-443.conf  # HTTPS configuration for example.com
-│   │   └── common_proxy.conf     # Common proxy settings for Nginx configurations
-│   └── sites-enabled/            # Active Nginx configurations (usually symlinked from sites-available)
-├── certbot/                      
-│   └── letsencrypt/              # Lets encrypt directories
-│   
-└── logs/                         # Directory for log files (renewal logs, cron output, etc.)
+.
+├── concatenator.sh                 # The main executable script
+├── exclude_directories.csv         # Rule: Exclude directories matching these patterns
+├── exclude_files.csv               # Rule: Exclude files matching these patterns
+├── exclude_extensions.csv          # Rule: Exclude files with these extensions
+├── comment_signs.csv               # Rule: Lines starting with these are comments
+├── output/
+│   ├── concatenated_output.txt     # The final merged file
+│   ├── included_files.txt          # List of all files included in the output
+│   └── concat_files.log            # Log of the script's operations
+└── README.md                       # This file
 ```
 
-## Conclusion
+## License
 
-This project is designed to simplify the process of securing your website with HTTPS by automating the acquisition and renewal of SSL certificates with Certbot and Nginx. By following this guide, you can quickly set up, maintain, and monitor your secure web server environment. For any questions, customization requests, or feature suggestions, feel free to open an issue or contact the maintainer.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-Happy Securing!
+---
+*Authored by Reza 'Sam' Aghamohammadi (Hacknitive)*
